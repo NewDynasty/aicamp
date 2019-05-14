@@ -18,10 +18,8 @@ from matplotlib import pyplot as plt
 def normalize_image(images):
     return images / 127.5 - 1
 
-
 def restore_image(images):
     return (images + 1) / 2
-
 
 def display_image(*images, col=None):
     if col is None:
@@ -35,10 +33,11 @@ def display_image(*images, col=None):
         plt.axis('off')
     plt.show()
 
-
 def get_image_loader(image_size, batch_size, color_mode='rgb', shuffle=True):
     # image_root = "/Users/ethan/datasets/marvel"
     image_root = '/Users/dynasty/Documents/workspace/code_python/aicamp/d2/marvel'
+    # image_root = '/home/dynasty/code/aicamp/d2/marvel'
+
     data_gen = ImageDataGenerator(
         # rescale=1 / 255.0,
         preprocessing_function=inception_v3.preprocess_input
@@ -59,29 +58,11 @@ def get_image_loader(image_size, batch_size, color_mode='rgb', shuffle=True):
     )
     return train_loader, valid_loader
 
-
 def get_feature_extractor():
     base = InceptionV3(include_top=False, input_shape=(224, 224, 3), pooling='avg')
     btnk = base.get_layer('mixed8').output
     features = GlobalAveragePooling2D()(btnk)
     return Model(base.input, features)
-
-
-def extract_features(extractor, dataset):
-    x, y = None, None
-    n = len(dataset)
-    for i in range(n):
-        print("\r[info] 正在提取特征: batch #{}/{}...".format(i + 1, n), end='')
-        batch_x, batch_y = dataset[i]
-        features = extractor.predict(batch_x)
-        if x is None:
-            x = features
-            y = batch_y
-        else:
-            x = np.vstack([x, features])
-            y = np.vstack([y, batch_y])
-    return x, y
-
 
 def create_nn(input_size, num_classes):
     inputs = Input(shape=(input_size,))
@@ -91,49 +72,60 @@ def create_nn(input_size, num_classes):
     out = Dense(num_classes, activation='softmax', kernel_regularizer=regularizers.l2(.1))(x)
     return Model(inputs, out)
 
-
 def create_new_nn(num_classes):
     base = InceptionV3(include_top=False, input_shape=(224, 224, 3), pooling='avg')
-    btnk = base.get_layer('mixed8').output
-    features = GlobalAveragePooling2D()(btnk)
-    x = Dropout(.6)(features)
+    # btnk = base.get_layer('mixed3').output
+    # features = GlobalAveragePooling2D()(btnk)
+    x = Dropout(.6)(base.output)
 
-    num_hidden_layers = 1
-    for _ in range(num_hidden_layers):
-        x = Dense(1024, activation='relu')(x)
-        x = BatchNormalization()(x)
-        x = Dropout(.6)(x)
+    # num_hidden_layers = 1
+    # for _ in range(num_hidden_layers):
+    #     x = Dense(1024, activation='relu')(x)
+    #     x = BatchNormalization()(x)
+    #     x = Dropout(.6)(x)
+
     # out = Dense(num_classes, activation='softmax', kernel_regularizer=regularizers.l2(.1))(x)
-    out = Dense(num_classes, activation='softmax', kernel_regularizer=l2(.0001))(x)
-    return Model(base.input, out)
+    out = Dense(num_classes, activation='softmax', kernel_regularizer=l2(1e-3))(x)
+    model = Model(base.input, out)
+    
+    for layer in model.layers:
+        layer.trainable = False
+        if layer.name == 'mixed3':
+            break
 
+    print(model.summary())
+
+    return model
 
 if __name__ == '__main__':
-    train, valid = get_image_loader(image_size=224, batch_size=16, shuffle=False)
-    # feature_extractor = get_feature_extractor()
-    # print("\n[info] 训练集特征提取:")
-    # x_train, y_train = extract_features(feature_extractor, train)
-    # print("\n[info] 训练集完成!\n")
-    #
-    # print("\n[info] 测试集特征提取:")
-    # x_valid, y_valid = extract_features(feature_extractor, valid)
-    # print("\n[info] 测试集完成!\n")
+    batch_size = 64
+    train, valid = get_image_loader(image_size=224, batch_size=batch_size, shuffle=True)
 
     print("\n[info] 创建末端全连通神经网络模型并加载优化算法...")
     # model = create_nn(x_train.shape[1], y_train.shape[1])
-
     model = create_new_nn(8)
-    opt = optimizers.Adam(lr=.0001, beta_1=.95, beta_2=.999, epsilon=1e-8)
-    model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['acc'])
+
+
+    print('\n[info] 创建模型完成， 加载优化算法。。。')
+    # opt = optimizers.Adam(lr=.0001, beta_1=.95, beta_2=.999, epsilon=1e-8)
+    # model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['acc'])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
     print("\n[info] 开始训练...")
     # H = model.fit(x_train, y_train, batch_size=64, epochs=50, validation_data=(x_valid, y_valid), verbose=1)
-    H = model.fit_generator(train, steps_per_epoch=161, epochs=50, verbose=2)
+    H = model.fit_generator(train, epochs=10, verbose=1, steps_per_epoch=np.math.ceil(2557/batch_size))
 
     print("\n[info] 训练完成! 开始检测模型性能...")
     # test_results = model.predict(x_valid)
-    test_results = model.predict_generator(valid)
+
+    eval = model.evaluate_generator(valid, steps=np.math.ceil(450/batch_size))
+    print(eval)
+
+    test_results = model.predict_generator(valid, steps=np.math.ceil(450/batch_size))
+    print(test_results)
+
     id2label = {val: key for key, val in valid.class_indices.items()}
+    print(id2label)
 
     # print(classification_report(
     #     y_valid.argmax(axis=1),
